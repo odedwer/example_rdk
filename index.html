@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="heb">
+<head>
+    <meta charset="utf-8">
+    <title>RDK</title>
+
+    <script src="https://cdn.jsdelivr.net/gh/jspsych/jsPsych@6.3.1/jspsych.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/jspsych/jsPsych@6.3.1/plugins/jspsych-preload.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/jspsych/jsPsych@6.3.1/plugins/jspsych-html-keyboard-response.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/jspsych/jsPsych@6.3.1/plugins/jspsych-survey-text.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/jspsych/jsPsych@6.3.1/plugins/jspsych-rdk.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jspsych/jsPsych@6.3.1/css/jspsych.css">
+    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1135.0.min.js"></script>
+</head>
+<body style="background-color: gray"></body>
+
+<script>
+
+    const LOG = false;
+
+    const NUMBER_OF_DOTS = 200;
+    const TRIAL_DURATION = 2000;
+    const BLANK_DURATION = 100
+    const DOT_RADIUS = 3;
+    const APERTURE_SIZE = 600;
+    const NUM_REPS_PER_COHERENCE_LEVEL = 1;
+    const NUM_BLOCKS = 1;
+    const DIRECTIONS = [180, 0]
+    const DIRECTIONS_KEYS = ["arrowleft", "ArrowRight"]
+    const COHERENCE_LEVELS = [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4];//arange(0, 1, 1 / (NUM_COHERENCE_LEVELS - 1))
+    const FEEDBACK_DURATION = 400
+    let rdk_direction_pairs = []
+    for (let i = 0; i < DIRECTIONS.length; ++i) {
+        for (let j = 0; j < COHERENCE_LEVELS.length; ++j) {
+            rdk_direction_pairs.push({
+                "coherent_direction": DIRECTIONS[i],
+                "coherence": COHERENCE_LEVELS[j],
+                "correct": DIRECTIONS_KEYS[i]
+            })
+        }
+    }
+    let block_num = 0;
+    let welcome1 = {
+        type: "html-keyboard-response",
+        stimulus: `
+    <h1 dir="rtl">ברוכים הבאים לניסוי.</h1>
+    <p style="font-size:150%;line-height: 1.3em" dir="rtl">
+    בניסוי זה יוצגו בפניכם נקודות נעות בכיוונים שונים.<br>
+    עליכם לקבוע האם קיימת תנועה של אחוז מסויים של נקודות לימין או לשמאל.<br>
+    אם אחוז מסויים מהנקודות נע לכיוון שמאל, לחצו על החץ הפונה לכיוון שמאל. <br>
+     אם אחוז מסויים מהנקודות נע לכיוון ימין, לחצו על החץ הפונה לכיוון ימין. </p><br><br>
+    <p style="font-size:150%;line-height: 1.3em" dir="rtl">נא ללחוץ על אנטר כדי להמשיך</p>`,
+        choices: ['Enter']
+    }; // First welcome screen
+
+
+    let after_train = {
+        type: "html-keyboard-response",
+        stimulus: `<p style="font-size:150%;line-height: 1.3em" dir="rtl">על מנת להתחיל את הניסוי, יש ללחוץ על מקש האנטר.</p>`,
+        choices: ['Enter']
+    };
+
+    let feedback = {
+        type: "html-keyboard-response",
+        stimulus: function () {
+            let data = jsPsych.data.get().last(2).values()[0];
+            if (data.correct) {
+                return `<h1 style="color: green" dir="rtl">נכון!</h1>`;
+            } else {
+                return `<h1 style="color: darkred" dir="rtl">לא נכון!</h1>`;
+            }
+        },
+        trial_duration: FEEDBACK_DURATION,
+        on_start: function (data) {
+            if (LOG) {
+                console.log("Feedback");
+            }
+        }
+    }
+    let trial = {
+        type: "rdk",
+        number_of_dots: NUMBER_OF_DOTS,
+        trial_duration: TRIAL_DURATION,
+        response_ends_trial: true,
+        RDK_type: 6,
+        coherence: jsPsych.timelineVariable("coherence"),
+        coherent_direction: jsPsych.timelineVariable("coherent_direction"),
+        correct_choice: jsPsych.timelineVariable("correct"),
+        opposite_coherence: 1 - jsPsych.timelineVariable("coherence"),
+        dot_radius: DOT_RADIUS,
+        aperture_width: APERTURE_SIZE,
+        aperture_type: 1,
+        move_distance: 1,
+        dot_life: 100,
+        choices: ["arrowleft", "ArrowRight"],
+        data: {
+            direction: jsPsych.timelineVariable("coherent_direction"),
+            coherence: jsPsych.timelineVariable("coherence")
+        },
+        on_finish: function (data) {
+            if (LOG) {
+                console.log(`Trial of block ${block_num}`)
+            }
+            data.block = block_num;
+        }
+    }
+    let blank = {
+        type: "html-keyboard-response",
+        stimulus: ``,
+        trial_duration: BLANK_DURATION,
+        response_ends_trial: false
+    };
+
+    let block_procedure = {
+        timeline: [trial, blank, feedback],
+        // initialize globals for the orientation trial block
+        timeline_variables: rdk_direction_pairs,
+        randomize_order: true,
+        sample: {
+            type: 'fixed-repetitions',
+            size: NUM_REPS_PER_COHERENCE_LEVEL / NUM_BLOCKS
+        },
+        on_timeline_start: function () {
+            block_num += 1;
+            if (LOG) {
+                console.log("Block")
+            }
+        }
+    };
+    let main_proc = {
+        timeline: [block_procedure],
+
+        repetitions: NUM_BLOCKS,
+        on_timeline_start: function (data) {
+            if (LOG) {
+                console.log("Main proc")
+            }
+        },
+    };
+    let end = {
+        type: "html-keyboard-response",
+        stimulus: `<h1 dir="rtl">סיימת את הניסוי, אפשר לסגור את העמוד</h1>`,
+        choices: ['Enter']
+    };
+
+    if (typeof jsPsych !== "undefined") {
+        jsPsych.init({
+            timeline: [welcome1, after_train, main_proc,end]
+        });
+    } else {
+        document.body.innerHTML = '<div style="text-align:center; margin-top:50%; transform:translate(0,-50%);">You must be online to run the experiment.</div>';
+    }
+
+</script>
+</html>
